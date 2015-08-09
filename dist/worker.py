@@ -51,8 +51,10 @@ def keys_to_data(o, data):
 
 @asyncio.coroutine
 def get_data(loop, keys, local_data, metadata_addr, update=False):
-    local = {k: local_data[k] for k in needed if k in local_data},
-    missing = [k for k in needed if k not in local_data]
+    local = {k: local_data[k] for k in keys if k in local_data}
+    missing = [k for k in keys if k not in local_data]
+    if not missing:
+        raise Return(local)
 
     msg = {'op': 'who-has', 'keys': other}
     who_has = yield From(dealer_send_recv(loop, metadata_attr, msg))
@@ -79,11 +81,11 @@ def compute(loop, msg, local_data, metadata_addr, store=True):
 
     data = yield From(get_data(loop, needed, local_data, metadata_addr))
 
-
     args2 = keys_to_data(args, data)
     kwargs2 = keys_to_data(kwargs, data)
 
-    result = yield From(delay(self.loop, func, *args2, **kwargs2))
+    # result = yield From(delay(loop, func, *args2, **kwargs2))
+    result = func(*args2, **kwargs2)
 
     if store:
         local_data[key] = result

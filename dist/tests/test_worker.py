@@ -117,10 +117,14 @@ def test_compute():
                    'args': ('x', 10),
                    'kwargs': dict(),
                    'needed': ['x'],
-                   'reply': True}
-            sock.send(dumps(msg))
-            result = yield From(delay(loop, sock.recv))
-            assert loads(result) == {'x': 123}
+                   'reply': True,
+                   'store': False}
+            for i in range(3):
+                sock.send(dumps(msg))
+                result = yield From(delay(loop, sock.recv))
+                assert loads(result) == {'op': 'computation-finished',
+                                         'key': 'y'}
+
             yield From(w.close())
 
         loop.run_until_complete(asyncio.gather(w.start(), f()))
