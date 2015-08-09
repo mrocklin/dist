@@ -45,12 +45,10 @@ def Loop():
 
 
 @contextmanager
-def worker(metadata_addr, loop=None, start=True):
+def worker(metadata_addr, loop=None):
     if loop is None:
         loop = asyncio.get_event_loop_policy().new_event_loop()
     w = Worker('127.0.0.1', 3598, '*', metadata_addr, loop=loop)
-    if start:
-        w.start()
 
     try:
         yield w
@@ -64,14 +62,13 @@ def everything():
     with Loop() as loop:
         with mdstore() as mds:
             with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port,
-                        start=False, loop=loop) as w:
+                        loop=loop) as w:
                 with dealer(w.address) as sock:
                     yield loop, mds, w, sock
 
 def test_Worker():
     with mdstore() as mds, Loop() as loop:
-        with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port, start=False,
-                    loop=loop) as w:
+        with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port, loop=loop) as w:
             with dealer(w.address) as sock:
 
                 @asyncio.coroutine
@@ -85,7 +82,7 @@ def test_Worker():
 
                     yield From(w.close())
 
-                loop.run_until_complete(asyncio.gather(w.start(), f()))
+                loop.run_until_complete(asyncio.gather(w.coroutine, f()))
 
 
 def test_get_data():
@@ -100,7 +97,7 @@ def test_get_data():
                 assert loads(result) == {'x': 123}
             yield From(w.close())
 
-        loop.run_until_complete(asyncio.gather(w.start(), f()))
+        loop.run_until_complete(asyncio.gather(w.coroutine, f()))
 
 
 def test_compute():
@@ -127,4 +124,4 @@ def test_compute():
 
             yield From(w.close())
 
-        loop.run_until_complete(asyncio.gather(w.start(), f()))
+        loop.run_until_complete(asyncio.gather(w.coroutine, f()))
