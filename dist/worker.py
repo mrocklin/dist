@@ -23,6 +23,13 @@ def dealer_send_recv(loop, addr, data):
 
 
 def keys_to_data(o, data):
+    """
+
+    >>> keys_to_data(('x', 'y'), {'x': 1})
+    (1, 'y')
+    >>> keys_to_data({'a': 'x', 'b': 'y'}, {'x': 1})
+    {'a': 1, 'b': 'y'}
+    """
     if isinstance(o, (tuple, list)):
         result = []
         for arg in o:
@@ -33,12 +40,12 @@ def keys_to_data(o, data):
         result = type(o)(result)
 
     if isinstance(o, dict):
+        result = {}
         for k, v in o.items():
-            result = {}
             try:
-                result[key] = data[arg]
+                result[k] = data[v]
             except (TypeError, KeyError):
-                result[key] = arg
+                result[k] = v
     return result
 
 
