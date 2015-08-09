@@ -55,6 +55,16 @@ def worker(metadata_addr, loop=None, start=True):
         if w.status != 'closed':
             w.close()
 
+
+@contextmanager
+def everything():
+    with Loop() as loop:
+        with mdstore() as mds:
+            with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port,
+                        start=False, loop=loop) as w:
+                with dealer(w.address) as sock:
+                    yield loop, mds, w, sock
+
 def test_Worker():
     with mdstore() as mds, Loop() as loop:
         with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port, start=False,
@@ -71,3 +81,18 @@ def test_Worker():
                     yield From(w.close())
 
                 loop.run_until_complete(asyncio.gather(w.start(), f()))
+
+
+def test_get_data():
+    with everything() as (loop, mds, w, sock):
+        w.data['x'] = 123
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'get-data', 'keys': ['x']}
+            for i in range(3):
+                sock.send(dumps(msg))
+                result = yield From(delay(loop, sock.recv))
+                assert loads(result) == {'x': 123}
+            yield From(w.close())
+
+        loop.run_until_complete(asyncio.gather(w.start(), f()))
