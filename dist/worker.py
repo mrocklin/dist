@@ -126,8 +126,7 @@ class Worker(object):
                                          if k in self.data}
                 self.send_q.put_nowait((addr, data))
             elif msg['op'] == 'ping':
-                self.router.send_multipart([addr, b'pong'])
-                # self.send_q.put_nowait((addr, b'pong'))
+                self.send_q.put_nowait((addr, b'pong'))
             else:
                 raise NotImplementedError("Bad Message: %s" % msg)
         raise Return("Done listening")
@@ -154,7 +153,7 @@ class Worker(object):
                 break
             if not isinstance(msg, bytes):
                 msg = dumps(msg)
-            yield From(delay(self.loop, self.router.send_multipart, [addr, msg]))
+            self.router.send_multipart([addr, msg])
 
         raise Return("Done replying")
 
