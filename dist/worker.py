@@ -94,6 +94,7 @@ class Worker(object):
         self.loop = loop or asyncio.get_event_loop()
         self.work_q = asyncio.Queue(loop=self.loop)
         self.send_q = asyncio.Queue(loop=self.loop)
+        self.status = None
 
     @property
     def address(self):
@@ -101,6 +102,7 @@ class Worker(object):
 
     @asyncio.coroutine
     def listen(self):
+        print("Listen boots up")
         while True:
             try:
                 socks = yield From(delay(self.loop, self.poller.poll))
@@ -109,25 +111,26 @@ class Worker(object):
                 break
             print("Communication received")
             if self._local_router in socks:
-                addr, bytes = self._local_router.recv_multipart()
+                addr, msg = self._local_router.recv_multipart()
             elif self.router in socks:
                 result = yield From(delay(self.loop, self.router.recv_multipart))
                 addr, bytes = result
-
-            msg = loads(bytes)
+                msg = loads(bytes)
             print("msg: %s" % str(msg))
-            if msg == 'close':
+            if msg == b'close':
                 break
-            if msg['op'] == 'compute':
+            elif msg['op'] == 'compute':
                 work_q.put_nowait(msg)
-            if msg['op'] == 'get-data':
+            elif msg['op'] == 'get-data':
                 data = {k: self.data[k] for k in msg['keys']
                                          if k in self.data}
                 self.send_q.put_nowait((addr, data))
-            if msg['op'] == 'ping':
-                self.send_q.put_nowait((addr, b'pong'))
+            elif msg['op'] == 'ping':
+                self.router.send_multipart([addr, b'pong'])
+                # self.send_q.put_nowait((addr, b'pong'))
             else:
                 raise NotImplementedError("Bad Message: %s" % msg)
+        raise Return("Done listening")
 
     @asyncio.coroutine
     def compute(self):
@@ -153,20 +156,30 @@ class Worker(object):
                 msg = dumps(msg)
             yield From(delay(self.loop, self.router.send_multipart, [addr, msg]))
 
+        raise Return("Done replying")
+
+    @asyncio.coroutine
     def close(self):
-        self._local_dealer.send(dumps('close'))
+        self._local_dealer.send(b'close')
         self.send_q.put_nowait((None, 'close'))
         self.work_q.put_nowait((None, 'close'))
-        self._thread.join()
+
+        yield From(asyncio.sleep(0.01))
+
         self.router.close()
         self._local_router.close()
         self._local_dealer.close()
 
-    def start(self, thread=True):
+        yield From(asyncio.sleep(0.01))
+
+        self.status = 'closed'
+
+    def setup_sockets(self):
+        self.status = 'running'
         self.router = context.socket(zmq.ROUTER)
         self.router.bind('tcp://%s:%d' % (self.bind_ip, self.port))
-        print("Binding router to %s" % 'tcp://%s:%d' % (self.bind_ip,
-            self.port))
+        print("Binding router to %s" %
+                ('tcp://%s:%d' % (self.bind_ip, self.port)))
 
         self._local_router = context.socket(zmq.ROUTER)
         port = self._local_router.bind_to_random_port('tcp://127.0.0.1')
@@ -177,14 +190,11 @@ class Worker(object):
         self.poller.register(self.router, zmq.POLLIN)
         self.poller.register(self._local_router, zmq.POLLIN)
 
-        cor = asyncio.gather(*[asyncio.Task(cor, loop=self.loop)
-                               for cor in [self.listen(),
-                                           self.compute(),
-                                           self.reply()]])
+    @asyncio.coroutine
+    def start(self):
+        self.setup_sockets()
 
-        if thread:
-            self._thread = Thread(target=self.loop.run_until_complete,
-                                  args=(cor,))
-            self._thread.start()
-        else:
-            self.loop.run_until_complete(cor)
+        cor = asyncio.gather(self.listen(),
+                             self.compute(),
+                             self.reply())
+        yield From(cor)
