@@ -8,8 +8,9 @@ context = zmq.Context()
 
 
 class MDStore(object):
-    def __init__(self, bind, loop=None):
-        self.bind = bind
+    def __init__(self, ip, port, loop=None):
+        self.ip = ip
+        self.port = port
         self.who_has = defaultdict(set)
         self.has_what = defaultdict(set)
 
@@ -19,8 +20,8 @@ class MDStore(object):
                 socks = dict(self.poller.poll())
             except KeyboardInterrupt:
                 break
-            if self._local_pull in socks:
-                addr, bytes = self._local_pull.recv_multipart()
+            if self._local_router in socks:
+                addr, bytes = self._local_router.recv_multipart()
             elif self.router in socks:
                 addr, bytes = self.router.recv_multipart()
             msg = loads(bytes)
@@ -28,22 +29,24 @@ class MDStore(object):
                 break
             if msg['op'] == 'who-has':
                 result = {k: self.who_has[k] for k in msg['keys']}
-                send(addr, result)
+                self.send(addr, result)
             if msg['op'] == 'register':
                 self.has_what[msg['address']].update(msg['keys'])
                 for key in msg['keys']:
                     self.who_has[key].add(msg['address'])
+                if msg.get('reply'):
+                    self.send(addr, b'OK')
 
     def send(self, addr, msg):
         if not isinstance(msg, bytes):
             msg = dumps(msg)
-        self.router.send_multipart(addr, msg)
+        self.router.send_multipart([addr, msg])
 
     def start(self, separate_thread=True):
         self.poller = zmq.Poller()
 
         self.router = context.socket(zmq.ROUTER)
-        self.router.bind(self.bind)
+        self.router.bind('tcp://%s:%d' % (self.ip, self.port))
         self.poller.register(self.router, zmq.POLLIN)
 
         self._local_router = context.socket(zmq.ROUTER)

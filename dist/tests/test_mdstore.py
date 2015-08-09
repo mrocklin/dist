@@ -1,10 +1,25 @@
 from dist import MDStore
+from dist.mdstore import dumps, loads
 from contextlib import contextmanager
+import zmq
+
+
+context = zmq.Context()
+
+
+@contextmanager
+def dealer(addr):
+    socket = context.socket(zmq.DEALER)
+    socket.connect(addr)
+    try:
+        yield socket
+    finally:
+        socket.close()
 
 
 @contextmanager
 def mdstore():
-    mds = MDStore('tcp://*:8003')
+    mds = MDStore('*', 8003)
     mds.start()
 
     try:
@@ -15,4 +30,17 @@ def mdstore():
 
 def test_mdstore():
     with mdstore() as mds:
-        pass
+        with dealer('tcp://127.0.0.1:%d' % mds.port) as sock:
+            msg = {'op': 'register', 'address': 'hank',
+                    'keys': ['x', 'y'], 'reply': True}
+            sock.send(dumps(msg))
+            ack = sock.recv()
+            assert ack == 'OK'
+            assert 'hank' in mds.who_has['x']
+            assert 'hank' in mds.who_has['y']
+            assert mds.has_what['hank'] == set(['x', 'y'])
+
+            msg = {'op': 'who-has', 'keys': ['x']}
+            sock.send(dumps(msg))
+            result = sock.recv()
+            assert loads(result) == {'x': set(['hank'])}
