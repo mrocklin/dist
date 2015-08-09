@@ -11,6 +11,16 @@ context = zmq.Context()
 
 
 class Worker(object):
+    """ A single Worker in a distributed network
+
+    >>> w = Worker(ip='192.168.0.45', port=8000, bind_ip='*',
+    ...            metadata_addr='192.168.0.13')
+    >>> w.loop.run_until_complete(w.go) # doctest: +SKIP
+
+    To close cause this coroutine to be run in the event loop
+
+    >>> w.close()  # doctest: +SKIP
+    """
     def __init__(self, ip, port, bind_ip,
                  metadata_addr, loop=None):
         self.ip = ip
