@@ -1,3 +1,36 @@
+""" Distributed worker network
+
+A worker responds to requests from the outside world via ZMQ sockets.
+It serves a dictionary of local data, processes and stores the results of
+arbitrary function calls, collecting data from peers as necessary.
+
+It depends on an externally set up MDStore and on its peers.
+
+Internally a worker maintains a bit of state:
+
+    data: dictionary of data
+
+And processing occurs on four coroutines
+
+    comm: Manage communication with the outside world via ZeroMQ
+    control: Dispatch incoming messages to the right process accordingly
+    work: Execute functions and store the results.
+          Communicate to peers as necessary
+    send: Prepare data to be sent out over comm
+
+These processes/coroutines interact over shared queues between each other and
+over ZeroMQ sockets with the outside world.
+
+            |       ------ send              |
+            |      /         ^               |
+            |      |         |\________      |    -> Worker
+            |      .         |         \     |   /
+   Router <-|--> comm --> control --> work <-|--->MDStore
+            |                                |   \           .
+            |                                |    -> Worker
+            |          One Worker            |
+"""
+
 import trollius as asyncio
 from trollius import From, Return, Task
 from toolz import merge, get
