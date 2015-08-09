@@ -113,7 +113,7 @@ class Worker(object):
             if self._local_router in socks:
                 addr, msg = self._local_router.recv_multipart()
             elif self.router in socks:
-                result = yield From(delay(self.loop, self.router.recv_multipart))
+                result = self.router.recv_multipart()
                 addr, bytes = result
                 msg = loads(bytes)
             print("msg: %s" % str(msg))
