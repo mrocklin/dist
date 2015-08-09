@@ -52,26 +52,27 @@ def keys_to_data(o, data):
 @asyncio.coroutine
 def get_data(loop, keys, local_data, metadata_addr, update=False):
     local = {k: local_data[k] for k in keys if k in local_data}
-    missing = [k for k in keys if k not in local_data]
-    if not missing:
-        raise Return(local)
+    missing = [k for k in keys if k not in local]
 
-    msg = {'op': 'who-has', 'keys': other}
-    who_has = yield From(dealer_send_recv(loop, metadata_attr, msg))
+    while missing:  # Are we missing anything?
+        # Ask who has the keys we want
+        msg = {'op': 'who-has', 'keys': missing}
+        who_has = yield From(dealer_send_recv(loop, metadata_attr, msg))
 
-    coroutines = [dealer_send_recv(loop, random.choice(who_has[k]),
-                                   {'op': 'get-data', 'keys': [k]})
-                                for k in missing]
+        # get those keys from remote sources
+        coroutines = [dealer_send_recv(loop, random.choice(who_has[k]),
+                                       {'op': 'get-data', 'keys': [k]})
+                                    for k in missing]
+        other = yield From(asyncio.gather(*coroutines))
 
-    other = yield From(asyncio.gather(*coroutines))
-    other = merge(other)
+        # Merge in to local and make sure we aren't still missing anything
+        local.update(merge(other))
+        missing = [k for k in keys if k not in local]
 
     if update:
-        local_data.update(other)
+        local_data.update(local)
 
-    result = merge(local, other)
-
-    raise Return(result)
+    raise Return(local)
 
 
 @asyncio.coroutine
