@@ -183,6 +183,19 @@ def control(control_q, work_q, send_q, data):
 
 @asyncio.coroutine
 def send(send_q, outgoing_q, signal_q):
+    """ Prep outgoing data before sending out on the wire
+
+    In particular the router is currently doing a blocking recv.  We need to
+    load an interrupt onto the signal queue as we load up the message onto the
+    outgoing queue
+
+    Input Channels:
+        send_q:  Messages of (addr, obj) pairs
+
+    Output Channels:
+        outgoing_q:  Messages of (addr, bytes) pairs
+        signal_q:  An interrupt signal to break the current block on the socket
+    """
     print("Send boots up")
     while True:
         addr, msg = yield From(send_q.get())
