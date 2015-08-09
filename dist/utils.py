@@ -2,7 +2,7 @@ import trollius as asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 
-executor = ThreadPoolExecutor(2)
+executor = ThreadPoolExecutor(8)
 
 
 def delay(loop, func, *args, **kwargs):

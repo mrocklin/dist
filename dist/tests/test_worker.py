@@ -45,10 +45,11 @@ def Loop():
 
 
 @contextmanager
-def worker(metadata_addr, loop=None):
+def worker(metadata_port, port=3598, loop=None):
     if loop is None:
         loop = asyncio.get_event_loop_policy().new_event_loop()
-    w = Worker('127.0.0.1', 3598, '*', metadata_addr, loop=loop)
+    w = Worker('127.0.0.1', port, '*', 'tcp://127.0.0.1:%d' % metadata_port,
+               loop=loop)
 
     try:
         yield w
@@ -61,14 +62,13 @@ def worker(metadata_addr, loop=None):
 def everything():
     with Loop() as loop:
         with mdstore() as mds:
-            with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port,
-                        loop=loop) as w:
+            with worker(metadata_port=mds.port, loop=loop) as w:
                 with dealer(w.address) as sock:
                     yield loop, mds, w, sock
 
 def test_Worker():
     with mdstore() as mds, Loop() as loop:
-        with worker(metadata_addr='tcp://127.0.0.1:%d' % mds.port, loop=loop) as w:
+        with worker(metadata_port=mds.port, loop=loop) as w:
             with dealer(w.address) as sock:
 
                 @asyncio.coroutine
@@ -114,8 +114,7 @@ def test_compute():
                    'args': ('x', 10),
                    'kwargs': dict(),
                    'needed': ['x'],
-                   'reply': True,
-                   'store': False}
+                   'reply': True}
             for i in range(3):
                 sock.send(dumps(msg))
                 result = yield From(delay(loop, sock.recv))
@@ -125,3 +124,33 @@ def test_compute():
             yield From(w.close())
 
         loop.run_until_complete(asyncio.gather(w.go, f()))
+
+
+def test_remote_gather():
+    with Loop() as loop, mdstore() as mds, worker(metadata_port=mds.port, port=1234, loop=loop) as a, worker(metadata_port=mds.port, port=4321, loop=loop) as b, dealer(a.address) as sock:
+
+        # Put 'x' in b's data.  Register with metadata store
+        b.data['x'] = 123
+        mds.who_has['x'].add(b.address)
+        mds.has_what[b.address].add('x')
+
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'compute',
+                   'key': 'y',
+                   'function': add,
+                   'args': ('x', 10),
+                   'kwargs': dict(),
+                   'needed': ['x'],
+                   'reply': True}
+
+            sock.send(dumps(msg))  # send to a, will need to get from b
+            result = yield From(delay(loop, sock.recv))
+            assert loads(result) == {'op': 'computation-finished',
+                                     'key': 'y'}
+
+            yield From(a.close())
+            yield From(b.close())
+
+        loop.run_until_complete(asyncio.gather(a.go, b.go, f()))
+        assert a.data['y'] == 10 + 123

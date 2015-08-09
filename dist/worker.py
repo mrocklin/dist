@@ -2,6 +2,7 @@ import trollius as asyncio
 from trollius import From, Return, Task
 from toolz import merge, get
 from dill import dumps, loads
+import random
 from threading import Thread
 from .utils import delay
 import zmq
@@ -57,10 +58,11 @@ def get_data(loop, keys, data, metadata_addr, update=False):
     while missing:  # Are we missing anything?
         # Ask who has the keys we want
         msg = {'op': 'who-has', 'keys': missing}
-        who_has = yield From(dealer_send_recv(loop, metadata_attr, msg))
+        who_has = yield From(dealer_send_recv(loop, metadata_addr, msg))
+        print("Collecting %s" % who_has)
 
         # get those keys from remote sources
-        coroutines = [dealer_send_recv(loop, random.choice(who_has[k]),
+        coroutines = [dealer_send_recv(loop, random.choice(list(who_has[k])),
                                        {'op': 'get-data', 'keys': [k]})
                                     for k in missing]
         other = yield From(asyncio.gather(*coroutines))
@@ -106,8 +108,7 @@ def work(work_q, send_q, data, metadata_addr, loop=None):
         # result = yield From(delay(loop, func, *args2, **kwargs2))
         result = func(*args2, **kwargs2)
 
-        if msg.get('store'):
-            data[key] = result
+        data[key] = result
 
         out = {'op': 'computation-finished',
                'key': msg['key']}
