@@ -244,7 +244,7 @@ class Worker(object):
 
         self.status = 'running'
 
-        self.coroutine = asyncio.gather(
+        self.go = asyncio.gather(
             work(self.work_q, self.send_q, self.data, self.metadata_addr, loop),
             control(self.control_q, self.work_q, self.send_q, self.data),
             send(self.send_q, self.outgoing_q, self.signal_q),

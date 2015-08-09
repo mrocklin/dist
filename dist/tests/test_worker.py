@@ -82,7 +82,7 @@ def test_Worker():
 
                     yield From(w.close())
 
-                loop.run_until_complete(asyncio.gather(w.coroutine, f()))
+                loop.run_until_complete(asyncio.gather(w.go, f()))
 
 
 def test_get_data():
@@ -97,7 +97,7 @@ def test_get_data():
                 assert loads(result) == {'x': 123}
             yield From(w.close())
 
-        loop.run_until_complete(asyncio.gather(w.coroutine, f()))
+        loop.run_until_complete(asyncio.gather(w.go, f()))
 
 
 def test_compute():
@@ -124,4 +124,4 @@ def test_compute():
 
             yield From(w.close())
 
-        loop.run_until_complete(asyncio.gather(w.coroutine, f()))
+        loop.run_until_complete(asyncio.gather(w.go, f()))
