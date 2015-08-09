@@ -1,5 +1,5 @@
 import trollius as asyncio
-from trollius import From, Return
+from trollius import From, Return, Task
 from toolz import merge, get
 from dill import dumps, loads
 from threading import Thread
@@ -74,20 +74,21 @@ def get_data(loop, keys, local_data, metadata_addr, update=False):
 
 @asyncio.coroutine
 def compute(loop, msg, local_data, metadata_addr, store=True):
-        key, func, args, kwargs, needed = \
-                get(msg, 'key', 'func', 'args', 'kwargs', 'needed')
+    key, func, args, kwargs, needed = \
+            get(['key', 'function', 'args', 'kwargs', 'needed'], msg)
 
-        data = yield From(get_data(loop, keys, local_data, metadata_addr))
+    data = yield From(get_data(loop, needed, local_data, metadata_addr))
 
-        args2 = keys_to_data(args, data)
-        kwargs2 = keys_to_data(kwargs, data)
 
-        result = yield From(delay(self.loop, func, *args2, **kwargs2))
+    args2 = keys_to_data(args, data)
+    kwargs2 = keys_to_data(kwargs, data)
 
-        if store:
-            local_data[key] = result
+    result = yield From(delay(self.loop, func, *args2, **kwargs2))
 
-        raise Return(result)
+    if store:
+        local_data[key] = result
+
+    raise Return(result)
 
 
 class Worker(object):
@@ -101,6 +102,8 @@ class Worker(object):
         self.loop = loop or asyncio.get_event_loop()
         self.work_q = asyncio.Queue(loop=self.loop)
         self.send_q = asyncio.Queue(loop=self.loop)
+        self.control_q = asyncio.Queue(loop=self.loop)
+        self.signal_q = asyncio.Queue(loop=self.loop)
         self.status = None
 
     @property
@@ -108,99 +111,103 @@ class Worker(object):
         return 'tcp://%s:%d' % (self.ip, self.port)
 
     @asyncio.coroutine
-    def listen(self):
-        print("Listen boots up")
+    def control(self):
+        print("Control boots up")
         while True:
-            try:
-                socks = yield From(delay(self.loop, self.poller.poll))
-                socks = dict(socks)
-            except KeyboardInterrupt:
-                break
-            print("Communication received")
-            if self._local_router in socks:
-                addr, msg = self._local_router.recv_multipart()
-            elif self.router in socks:
-                result = self.router.recv_multipart()
-                addr, bytes = result
-                msg = loads(bytes)
-            print("msg: %s" % str(msg))
+            addr, msg = yield From(self.control_q.get())
             if msg == b'close':
                 break
             elif msg['op'] == 'compute':
-                work_q.put_nowait(msg)
+                self.work_q.put_nowait((addr, msg))
             elif msg['op'] == 'get-data':
                 data = {k: self.data[k] for k in msg['keys']
                                          if k in self.data}
-                self.send_q.put_nowait((addr, data))
+                self.send(addr, data)
             elif msg['op'] == 'ping':
-                self.send_q.put_nowait((addr, b'pong'))
+                self.send(addr, b'pong')
             else:
                 raise NotImplementedError("Bad Message: %s" % msg)
         raise Return("Done listening")
+
+    def send(self, addr, msg):
+        if not isinstance(msg, bytes):
+            msg = dumps(msg)
+        self.send_q.put_nowait((addr, msg))
+        self.signal_q.put_nowait('interrupt')
 
     @asyncio.coroutine
     def compute(self):
         while True:
             addr, msg = yield From(self.work_q.get())
-            print('compute', msg)
             if msg == 'close':
                 break
 
             result = yield From(compute(self.loop, msg, self.data, self.metadata_addr))
             out = {'op': 'computation-finished',
                    'key': msg['key']}
-            self.send_q.put_nowait((addr, out))
+            self.send(addr, out)
 
     @asyncio.coroutine
-    def reply(self):
+    def comm(self):
+        wait_signal = Task(self.signal_q.get(), loop=self.loop)
         while True:
-            addr, msg = yield From(self.send_q.get())
-            print('reply', msg)
-            if msg == 'close':
-                break
-            if not isinstance(msg, bytes):
-                msg = dumps(msg)
-            self.router.send_multipart([addr, msg])
+            wait_router = delay(self.loop, self.router.recv_multipart)
+            [first], [other] = yield From(
+                    asyncio.wait([wait_router, wait_signal],
+                                 return_when=asyncio.FIRST_COMPLETED))
 
-        raise Return("Done replying")
+            if first is wait_signal:        # Interrupt socket recv
+                self._dealer.send(b'break')
+                addr, data = yield From(wait_router)  # should be fast
+                assert data == b'break'
+
+            while not self.send_q.empty():  # Flow data out
+                addr, msg = self.send_q.get_nowait()
+                if not isinstance(msg, bytes):
+                    msg = dumps(msg)
+                self.router.send_multipart([addr, msg])
+                print("Message sent: %s" % str(msg))
+
+            if first is wait_signal:        # Handle internal messages
+                msg = wait_signal.result()
+                if msg == b'close':
+                    break
+                elif msg == b'interrupt':
+                    wait_signal = Task(self.signal_q.get(), loop=self.loop)
+                    continue
+            elif first is wait_router:      # Handle external messages
+                addr, byts = wait_router.result()
+                msg = loads(byts)
+                print("Communication received: %s" % str(msg))
+                self.control_q.put_nowait((addr, msg))
 
     @asyncio.coroutine
     def close(self):
-        self._local_dealer.send(b'close')
-        self.send_q.put_nowait((None, 'close'))
-        self.work_q.put_nowait((None, 'close'))
+        self.work_q.put_nowait((None, b'close'))
+        self.control_q.put_nowait((None, b'close'))
+        self.signal_q.put_nowait(b'close')
 
         yield From(asyncio.sleep(0.01))
 
-        self.router.close()
-        self._local_router.close()
-        self._local_dealer.close()
-
-        yield From(asyncio.sleep(0.01))
-
+        self.router.close(linger=1)
+        self._dealer.close(linger=1)
         self.status = 'closed'
 
     def setup_sockets(self):
         self.status = 'running'
         self.router = context.socket(zmq.ROUTER)
         self.router.bind('tcp://%s:%d' % (self.bind_ip, self.port))
+        self._dealer = context.socket(zmq.DEALER)
+        self._dealer.connect('tcp://127.0.0.1:%d' % self.port)
         print("Binding router to %s" %
                 ('tcp://%s:%d' % (self.bind_ip, self.port)))
 
-        self._local_router = context.socket(zmq.ROUTER)
-        port = self._local_router.bind_to_random_port('tcp://127.0.0.1')
-        self._local_dealer = context.socket(zmq.DEALER)
-        self._local_dealer.connect('tcp://127.0.0.1:%d' % port)
-
-        self.poller = zmq.Poller()
-        self.poller.register(self.router, zmq.POLLIN)
-        self.poller.register(self._local_router, zmq.POLLIN)
 
     @asyncio.coroutine
     def start(self):
         self.setup_sockets()
 
-        cor = asyncio.gather(self.listen(),
+        cor = asyncio.gather(self.control(),
                              self.compute(),
-                             self.reply())
+                             self.comm())
         yield From(cor)

@@ -4,6 +4,7 @@ from dist.utils import delay
 import trollius as asyncio
 from trollius import From, Return
 from contextlib import contextmanager
+from operator import add
 import zmq
 
 
@@ -19,10 +20,12 @@ def dealer(addr):
     finally:
         socket.close()
 
+port = [8012]
 
 @contextmanager
 def mdstore():
-    mds = MDStore('*', 8008)
+    port[0] += 1
+    mds = MDStore('*', port[0])
     mds.start()
 
     try:
@@ -45,7 +48,7 @@ def Loop():
 def worker(metadata_addr, loop=None, start=True):
     if loop is None:
         loop = asyncio.get_event_loop_policy().new_event_loop()
-    w = Worker('127.0.0.1', 3483, '*', metadata_addr, loop=loop)
+    w = Worker('127.0.0.1', 3598, '*', metadata_addr, loop=loop)
     if start:
         w.start()
 
@@ -77,7 +80,9 @@ def test_Worker():
                     for i in range(3):
                         sock.send(dumps(msg))
                         result = yield From(delay(loop, sock.recv))
+                        print(result)
                         assert result == b'pong'
+
                     yield From(w.close())
 
                 loop.run_until_complete(asyncio.gather(w.start(), f()))
@@ -93,6 +98,29 @@ def test_get_data():
                 sock.send(dumps(msg))
                 result = yield From(delay(loop, sock.recv))
                 assert loads(result) == {'x': 123}
+            yield From(w.close())
+
+        loop.run_until_complete(asyncio.gather(w.start(), f()))
+
+
+def test_compute():
+    with everything() as (loop, mds, w, sock):
+        w.data['x'] = 123
+        mds.who_has['x'].add(w.address)
+        mds.has_what[w.address].add('x')
+
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'compute',
+                   'key': 'y',
+                   'function': add,
+                   'args': ('x', 10),
+                   'kwargs': dict(),
+                   'needed': ['x'],
+                   'reply': True}
+            sock.send(dumps(msg))
+            result = yield From(delay(loop, sock.recv))
+            assert loads(result) == {'x': 123}
             yield From(w.close())
 
         loop.run_until_complete(asyncio.gather(w.start(), f()))
