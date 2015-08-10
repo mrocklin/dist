@@ -80,7 +80,7 @@ def test_Worker():
                         print(result)
                         assert result == b'pong'
 
-                    yield From(w.close())
+                    w.close()
 
                 loop.run_until_complete(asyncio.gather(w.go, f()))
 
@@ -95,7 +95,7 @@ def test_get_data():
                 sock.send(dumps(msg))
                 result = yield From(delay(loop, sock.recv))
                 assert loads(result) == {'x': 123}
-            yield From(w.close())
+            w.close()
 
         loop.run_until_complete(asyncio.gather(w.go, f()))
 
@@ -121,7 +121,7 @@ def test_compute():
                 assert loads(result) == {'op': 'computation-finished',
                                          'key': 'y'}
 
-            yield From(w.close())
+            w.close()
 
         loop.run_until_complete(asyncio.gather(w.go, f()))
 
@@ -149,8 +149,8 @@ def test_remote_gather():
             assert loads(result) == {'op': 'computation-finished',
                                      'key': 'y'}
 
-            yield From(a.close())
-            yield From(b.close())
+            a.close()
+            b.close()
 
         loop.run_until_complete(asyncio.gather(a.go, b.go, f()))
         assert a.data['y'] == 10 + 123

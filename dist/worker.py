@@ -81,7 +81,6 @@ class Worker(object):
     def address(self):
         return 'tcp://%s:%d' % (self.ip, self.port)
 
-    @asyncio.coroutine
     def close(self):
         self.signal_q.put_nowait(b'close')
         self.status = 'closing'
