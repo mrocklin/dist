@@ -37,6 +37,9 @@ class MDStore(object):
                     self.who_has[key].add(msg['address'])
                 if msg.get('reply'):
                     self.send(addr, b'OK')
+            if msg['op'] == 'list':
+                result = set(self.has_what)
+                self.send(addr, result)
 
     def send(self, addr, msg):
         msg = dumps(msg)

@@ -44,3 +44,8 @@ def test_mdstore():
             sock.send(dumps(msg))
             result = sock.recv()
             assert loads(result) == {'x': set(['hank'])}
+
+            msg = {'op': 'list', 'number': 0}
+            sock.send(dumps(msg))
+            result = sock.recv()
+            assert loads(result) == set(['hank'])
