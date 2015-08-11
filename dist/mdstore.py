@@ -8,11 +8,16 @@ context = zmq.Context()
 
 
 class MDStore(object):
-    def __init__(self, ip, port, loop=None):
+    def __init__(self, ip, port, bind_ip='*', loop=None):
         self.ip = ip
-        self.port = port
+        self.port = int(port)
+        self.bind_ip = ip
         self.who_has = defaultdict(set)
         self.has_what = defaultdict(set)
+
+    @property
+    def address(self):
+        return 'tcp://%s:%d' % (self.ip, self.port)
 
     def listen(self):
         while True:
@@ -27,17 +32,28 @@ class MDStore(object):
             msg = loads(bytes)
             if msg['op'] == 'close':
                 break
-            if msg['op'] == 'who-has':
+            elif msg['op'] == 'who-has':
                 result = {k: self.who_has[k] for k in msg['keys']}
                 self.send(addr, result)
-            if msg['op'] == 'register':
+            elif msg['op'] == 'register':
                 self.has_what[msg['address']].update(msg['keys'])
                 print("Register: %s" % str(msg))
                 for key in msg['keys']:
                     self.who_has[key].add(msg['address'])
                 if msg.get('reply'):
                     self.send(addr, b'OK')
-            if msg['op'] == 'list':
+            elif msg['op'] == 'unregister':
+                for key in msg['keys']:
+                    if key in self.has_what[msg['address']]:
+                        self.has_what[msg['address']].remove(key)
+                    try:
+                        self.who_has[key].remove(msg['address'])
+                    except KeyError:
+                        pass
+                print("UnRegister: %s" % str(msg))
+                if msg.get('reply'):
+                    self.send(addr, b'OK')
+            elif msg['op'] == 'list':
                 result = set(self.has_what)
                 self.send(addr, result)
 
@@ -49,7 +65,7 @@ class MDStore(object):
         self.poller = zmq.Poller()
 
         self.router = context.socket(zmq.ROUTER)
-        self.router.bind('tcp://%s:%d' % (self.ip, self.port))
+        self.router.bind('tcp://%s:%d' % (self.bind_ip, self.port))
         self.poller.register(self.router, zmq.POLLIN)
 
         self._local_router = context.socket(zmq.ROUTER)

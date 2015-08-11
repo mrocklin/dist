@@ -1,31 +1,6 @@
 from dist import MDStore
 from dist.mdstore import dumps, loads
-from contextlib import contextmanager
-import zmq
-
-
-context = zmq.Context()
-
-
-@contextmanager
-def dealer(addr):
-    socket = context.socket(zmq.DEALER)
-    socket.connect(addr)
-    try:
-        yield socket
-    finally:
-        socket.close()
-
-
-@contextmanager
-def mdstore():
-    mds = MDStore('*', 8003)
-    mds.start()
-
-    try:
-        yield mds
-    finally:
-        mds.close()
+from dist.test_utils import mdstore, dealer
 
 
 def test_mdstore():
@@ -49,3 +24,12 @@ def test_mdstore():
             sock.send(dumps(msg))
             result = sock.recv()
             assert loads(result) == set(['hank'])
+
+
+            msg = {'op': 'unregister', 'address': 'hank', 'keys': ['x'],
+                   'reply': True}
+            sock.send(dumps(msg))
+            result = sock.recv()
+            assert mds.who_has['x'] == set()
+            assert mds.who_has['y'] == set(['hank'])
+            assert mds.has_what['hank'] == set(['y'])
