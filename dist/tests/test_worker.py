@@ -152,3 +152,25 @@ def test_remote_gather():
 
         loop.run_until_complete(asyncio.gather(a.go(), b.go(), f()))
         assert a.data['y'] == 10 + 123
+
+
+def test_no_data_found():
+    with everything() as (loop, mds, w, sock):
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'compute',
+                   'key': 'y',
+                   'function': add,
+                   'args': ('asdf', 10),
+                   'needed': ['asdf'],
+                   'reply': True}
+            sock.send(dumps(msg))
+            result = yield From(delay(loop, sock.recv))
+            result = loads(result)
+            assert result['op'] == 'computation-failed'
+            assert isinstance(result['error'], KeyError)
+            assert 'asdf' in str(result['error'])
+
+            w.close()
+
+        loop.run_until_complete(asyncio.gather(w.go(), f()))

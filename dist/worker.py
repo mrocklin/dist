@@ -242,18 +242,23 @@ def work(work_q, send_q, data, metadata_addr, loop=None):
         key, func, args, kwargs, needed = \
                 get(['key', 'function', 'args', 'kwargs', 'needed'], msg, None)
 
-        d = yield From(get_data(loop, needed, data, metadata_addr))
+        try:
+            d = yield From(get_data(loop, needed, data, metadata_addr))
+        except KeyError as e:
+            out = {'op': 'computation-failed',
+                   'key': msg['key'],
+                   'error': e}
+        else:
+            args2 = keys_to_data(args or (), d)
+            kwargs2 = keys_to_data(kwargs or {}, d)
 
-        args2 = keys_to_data(args or (), d)
-        kwargs2 = keys_to_data(kwargs or {}, d)
+            # result = yield From(delay(loop, func, *args2, **kwargs2))
+            result = func(*args2, **kwargs2)
 
-        # result = yield From(delay(loop, func, *args2, **kwargs2))
-        result = func(*args2, **kwargs2)
+            data[key] = result
 
-        data[key] = result
-
-        out = {'op': 'computation-finished',
-               'key': msg['key']}
+            out = {'op': 'computation-finished',
+                   'key': msg['key']}
 
         send_q.put_nowait((addr, out))
 
@@ -269,6 +274,9 @@ def get_data(loop, keys, data, metadata_addr, update=False):
         # Ask who has the keys we want
         msg = {'op': 'who-has', 'keys': missing}
         who_has = yield From(dealer_send_recv(loop, metadata_addr, msg))
+        lost = set(missing) - set(k for k, v in who_has.items() if v)
+        if lost:
+            raise KeyError("Missing keys {%s}" % ', '.join(map(str, lost)))
         print("Collecting %s" % who_has)
 
         # get those keys from remote sources
@@ -308,8 +316,6 @@ def keys_to_data(o, data):
     >>> keys_to_data({'a': 'x', 'b': 'y'}, {'x': 1})
     {'a': 1, 'b': 'y'}
     """
-    if not o:
-        return o
     if isinstance(o, (tuple, list)):
         result = []
         for arg in o:
