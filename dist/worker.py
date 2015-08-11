@@ -70,12 +70,22 @@ class Worker(object):
 
         self.status = 'running'
 
-        self.go = asyncio.gather(
-            work(self.work_q, self.send_q, self.data, self.metadata_addr, loop),
+    @asyncio.coroutine
+    def go(self):
+        coroutines = [
+            work(self.work_q, self.send_q, self.data, self.metadata_addr, self.loop),
             control(self.control_q, self.work_q, self.send_q, self.data),
             send(self.send_q, self.outgoing_q, self.signal_q),
-            comm(ip, port, bind_ip, self.signal_q, self.control_q,
-                 self.outgoing_q, loop, context))
+            comm(self.ip, self.port, self.bind_ip, self.signal_q, self.control_q,
+                 self.outgoing_q, self.loop, context)]
+
+        yield From(asyncio.wait(coroutines,
+                                return_when=asyncio.FIRST_COMPLETED))
+        self.close()
+
+        print("Closing")
+
+        yield From(asyncio.gather(*coroutines))
 
     @property
     def address(self):
@@ -230,12 +240,12 @@ def work(work_q, send_q, data, metadata_addr, loop=None):
             break
 
         key, func, args, kwargs, needed = \
-                get(['key', 'function', 'args', 'kwargs', 'needed'], msg)
+                get(['key', 'function', 'args', 'kwargs', 'needed'], msg, None)
 
         d = yield From(get_data(loop, needed, data, metadata_addr))
 
-        args2 = keys_to_data(args, d)
-        kwargs2 = keys_to_data(kwargs, d)
+        args2 = keys_to_data(args or (), d)
+        kwargs2 = keys_to_data(kwargs or {}, d)
 
         # result = yield From(delay(loop, func, *args2, **kwargs2))
         result = func(*args2, **kwargs2)
@@ -253,7 +263,7 @@ def work(work_q, send_q, data, metadata_addr, loop=None):
 @asyncio.coroutine
 def get_data(loop, keys, data, metadata_addr, update=False):
     local = {k: data[k] for k in keys if k in data}
-    missing = [k for k in keys if k not in local]
+    missing = [k for k in keys if k not in local] if keys else []
 
     while missing:  # Are we missing anything?
         # Ask who has the keys we want
@@ -298,6 +308,8 @@ def keys_to_data(o, data):
     >>> keys_to_data({'a': 'x', 'b': 'y'}, {'x': 1})
     {'a': 1, 'b': 'y'}
     """
+    if not o:
+        return o
     if isinstance(o, (tuple, list)):
         result = []
         for arg in o:

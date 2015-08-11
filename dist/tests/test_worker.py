@@ -82,7 +82,7 @@ def test_Worker():
 
                     w.close()
 
-                loop.run_until_complete(asyncio.gather(w.go, f()))
+                loop.run_until_complete(asyncio.gather(w.go(), f()))
 
 
 def test_get_data():
@@ -97,7 +97,7 @@ def test_get_data():
                 assert loads(result) == {'x': 123}
             w.close()
 
-        loop.run_until_complete(asyncio.gather(w.go, f()))
+        loop.run_until_complete(asyncio.gather(w.go(), f()))
 
 
 def test_compute():
@@ -112,7 +112,6 @@ def test_compute():
                    'key': 'y',
                    'function': add,
                    'args': ('x', 10),
-                   'kwargs': dict(),
                    'needed': ['x'],
                    'reply': True}
             for i in range(3):
@@ -123,7 +122,7 @@ def test_compute():
 
             w.close()
 
-        loop.run_until_complete(asyncio.gather(w.go, f()))
+        loop.run_until_complete(asyncio.gather(w.go(), f()))
 
 
 def test_remote_gather():
@@ -140,7 +139,6 @@ def test_remote_gather():
                    'key': 'y',
                    'function': add,
                    'args': ('x', 10),
-                   'kwargs': dict(),
                    'needed': ['x'],
                    'reply': True}
 
@@ -152,5 +150,5 @@ def test_remote_gather():
             a.close()
             b.close()
 
-        loop.run_until_complete(asyncio.gather(a.go, b.go, f()))
+        loop.run_until_complete(asyncio.gather(a.go(), b.go(), f()))
         assert a.data['y'] == 10 + 123
