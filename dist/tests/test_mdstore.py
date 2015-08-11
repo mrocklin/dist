@@ -34,8 +34,8 @@ def test_mdstore():
             msg = {'op': 'register', 'address': 'hank',
                     'keys': ['x', 'y'], 'reply': True}
             sock.send(dumps(msg))
-            ack = sock.recv()
-            assert ack == 'OK'
+            ack = loads(sock.recv())
+            assert ack == b'OK'
             assert 'hank' in mds.who_has['x']
             assert 'hank' in mds.who_has['y']
             assert mds.has_what['hank'] == set(['x', 'y'])

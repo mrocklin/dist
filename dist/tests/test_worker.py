@@ -152,6 +152,8 @@ def test_remote_gather():
 
         loop.run_until_complete(asyncio.gather(a.go(), b.go(), f()))
         assert a.data['y'] == 10 + 123
+        assert mds.who_has['y'] == set([a.address])
+        assert 'y' in mds.has_what[a.address]
 
 
 def test_no_data_found():

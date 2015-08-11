@@ -32,14 +32,14 @@ class MDStore(object):
                 self.send(addr, result)
             if msg['op'] == 'register':
                 self.has_what[msg['address']].update(msg['keys'])
+                print("Register: %s" % str(msg))
                 for key in msg['keys']:
                     self.who_has[key].add(msg['address'])
                 if msg.get('reply'):
                     self.send(addr, b'OK')
 
     def send(self, addr, msg):
-        if not isinstance(msg, bytes):
-            msg = dumps(msg)
+        msg = dumps(msg)
         self.router.send_multipart([addr, msg])
 
     def start(self, separate_thread=True):

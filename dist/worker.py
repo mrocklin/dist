@@ -36,7 +36,6 @@ from trollius import From, Return, Task
 from toolz import merge, get
 from dill import dumps, loads
 import random
-from threading import Thread
 from .utils import delay
 import zmq
 
@@ -73,7 +72,8 @@ class Worker(object):
     @asyncio.coroutine
     def go(self):
         coroutines = [
-            work(self.work_q, self.send_q, self.data, self.metadata_addr, self.loop),
+            work(self.work_q, self.send_q, self.data, self.metadata_addr,
+                 self.address, self.loop),
             control(self.control_q, self.work_q, self.send_q, self.data),
             send(self.send_q, self.outgoing_q, self.signal_q),
             comm(self.ip, self.port, self.bind_ip, self.signal_q, self.control_q,
@@ -220,7 +220,7 @@ def send(send_q, outgoing_q, signal_q):
 
 
 @asyncio.coroutine
-def work(work_q, send_q, data, metadata_addr, loop=None):
+def work(work_q, send_q, data, metadata_addr, address, loop=None):
     """ Work coroutine
 
     Input Channels:
@@ -256,6 +256,12 @@ def work(work_q, send_q, data, metadata_addr, loop=None):
             result = func(*args2, **kwargs2)
 
             data[key] = result
+
+            # Register ourselves with the metadata store
+            req = {'op': 'register', 'keys': [key], 'address': address,
+                    'reply': True}
+            response = yield From(dealer_send_recv(loop, metadata_addr, req))
+            assert response == b'OK'
 
             out = {'op': 'computation-finished',
                    'key': msg['key']}
