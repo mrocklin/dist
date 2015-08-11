@@ -272,26 +272,44 @@ def work(work_q, send_q, data, metadata_addr, address, loop=None):
 
 
 @asyncio.coroutine
+def get_datum(loop, addr, keys):
+    msg = {'op': 'get-data',
+           'keys': list(keys)}
+
+    result = yield From(dealer_send_recv(loop, addr, msg))
+
+    assert isinstance(result , dict)
+    assert set(result) == set(keys)
+
+    raise Return(result)
+
+
+@asyncio.coroutine
+def get_remote_data(loop, keys, metadata_addr, update=False):
+    msg = {'op': 'who-has', 'keys': keys}
+    who_has = yield From(dealer_send_recv(loop, metadata_addr, msg))
+
+    lost = set(keys) - set(k for k, v in who_has.items() if v)
+    if lost:
+        raise KeyError("Missing keys {%s}" % ', '.join(map(str, lost)))
+
+    # get those keys from remote sources
+    print("Collecting %s" % who_has)
+    coroutines = [get_datum(loop, random.choice(list(who_has[k])), [k])
+                  for k in keys]
+    result = yield From(asyncio.gather(*coroutines))
+
+
+    raise Return(merge(result))
+
+
+@asyncio.coroutine
 def get_data(loop, keys, data, metadata_addr, update=False):
     local = {k: data[k] for k in keys if k in data}
     missing = [k for k in keys if k not in local] if keys else []
 
     while missing:  # Are we missing anything?
-        # Ask who has the keys we want
-        msg = {'op': 'who-has', 'keys': missing}
-        who_has = yield From(dealer_send_recv(loop, metadata_addr, msg))
-        lost = set(missing) - set(k for k, v in who_has.items() if v)
-        if lost:
-            raise KeyError("Missing keys {%s}" % ', '.join(map(str, lost)))
-        print("Collecting %s" % who_has)
-
-        # get those keys from remote sources
-        coroutines = [dealer_send_recv(loop, random.choice(list(who_has[k])),
-                                       {'op': 'get-data', 'keys': [k]})
-                                    for k in missing]
-        other = yield From(asyncio.gather(*coroutines))
-
-        # Merge in to local and make sure we aren't still missing anything
+        other = yield From(get_remote_data(loop, keys, metadata_addr))
         local.update(merge(other))
         missing = [k for k in keys if k not in local]
 
