@@ -118,3 +118,33 @@ def test_no_data_found():
             w.close()
 
         loop.run_until_complete(asyncio.gather(w.go(), f()))
+
+
+"""
+def test_worker_data_management():
+    with everything() as (loop, mds, w, sock):
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'put-data',
+                   'keys': ['x', 'y'],
+                   'values': [1, 2],
+                   'reply': True}
+            sock.send(dumps(msg))
+            result = yield From(delay(loop, sock.recv))
+            result = loads(result)
+            assert result['op'] == 'put-ack'
+            assert w.data == {'x': 1, 'y': 2}
+
+            w.close()
+
+        loop.run_until_complete(asyncio.gather(w.go(), f()))
+
+        for i in range(100):
+            sleep(0.01)
+            if mds.who_has['x']:
+                break
+
+        assert mds.who_has['x'] == set([w.address])
+        assert mds.who_has['y'] == set([w.address])
+        assert mds.has_what[w.address] == set(['x', 'y'])
+"""

@@ -30,6 +30,7 @@ class MDStore(object):
             elif self.router in socks:
                 addr, bytes = self.router.recv_multipart()
             msg = loads(bytes)
+            print("MDStore received: %s" % str(msg))
             if msg['op'] == 'close':
                 break
             elif msg['op'] == 'who-has':
