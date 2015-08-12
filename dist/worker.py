@@ -63,6 +63,7 @@ class Worker(object):
         self.loop = loop or asyncio.get_event_loop()
         self.work_q = asyncio.Queue(loop=self.loop)
         self.send_q = asyncio.Queue(loop=self.loop)
+        self.data_q = asyncio.Queue(loop=self.loop)
         self.outgoing_q = asyncio.Queue(loop=self.loop)
         self.control_q = asyncio.Queue(loop=self.loop)
         self.signal_q = asyncio.Queue(loop=self.loop)
@@ -75,16 +76,22 @@ class Worker(object):
     @asyncio.coroutine
     def go(self):
         coroutines = [
-            work(self.work_q, self.send_q, self.data, self.metadata_addr,
-                 self.address, self.loop),
-            control(self.control_q, self.work_q, self.send_q, self.data),
-            send(self.send_q, self.outgoing_q, self.signal_q),
-            comm(self.ip, self.port, self.bind_ip, self.signal_q, self.control_q,
-                 self.outgoing_q, self.loop, context)]
+                work(self.work_q, self.send_q, self.data, self.metadata_addr,
+                     self.address, self.loop),
+                control(self.control_q, self.work_q, self.send_q, self.data_q,
+                        self.data),
+                send(self.send_q, self.outgoing_q, self.signal_q),
+                comm(self.ip, self.port, self.bind_ip, self.signal_q,
+                     self.control_q, self.outgoing_q, self.loop, context),
+                manage_data(self.data_q, self.send_q, self.data,
+                            self.metadata_addr, self.address)
+            ]
 
-        yield From(asyncio.wait(coroutines,
-                                return_when=asyncio.FIRST_COMPLETED))
-        self.close()
+        try:
+            yield From(asyncio.wait(coroutines,
+                                    return_when=asyncio.FIRST_COMPLETED))
+        finally:
+            self.close()
 
         print("Closing")
 
@@ -98,10 +105,13 @@ class Worker(object):
         self.signal_q.put_nowait(b'close')
         self.status = 'closing'
 
+    def start(self):
+        self.loop.run_until_complete(self.go())
+
 
 @asyncio.coroutine
 def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
-        context=None):
+         context=None):
     """ Communications coroutine
 
     Input Channels:
@@ -156,14 +166,14 @@ def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
             print("Communication received: %s" % str(msg))
             control_q.put_nowait((addr, msg))
 
-    router.close(1)
-    dealer.close(1)
+    router.close(linger=2)
+    dealer.close(linger=2)
 
     raise Return("Done communicating")
 
 
 @asyncio.coroutine
-def control(control_q, work_q, send_q, data):
+def control(control_q, work_q, send_q, data_q, data):
     """ Control coroutine, general dispatching
 
     Input Channels:
@@ -179,19 +189,61 @@ def control(control_q, work_q, send_q, data):
         if msg == b'close':
             work_q.put_nowait((addr, msg))
             send_q.put_nowait((addr, msg))
+            data_q.put_nowait((addr, msg))
             break
         elif msg['op'] == 'compute':
             work_q.put_nowait((addr, msg))
-        elif msg['op'] == 'get-data':
-            data = {k: data[k] for k in msg['keys']
-                                if k in data}
-            send_q.put_nowait((addr, data))
+        elif msg['op'] in ['get-data', 'put-data', 'del-data']:
+            data_q.put_nowait((addr, msg))
         elif msg['op'] == 'ping':
             send_q.put_nowait((addr, b'pong'))
         else:
             raise NotImplementedError("Bad Message: %s" % msg)
     raise Return("Done listening")
 
+
+@asyncio.coroutine
+def manage_data(data_q, send_q, data, metadata_addr, address):
+    """ Manage local dictionary of data
+
+    Input Channels:
+        data_q:  Messages of (addr, msg) pairs
+
+    Output Channels:
+        send_q:  Send out messages to if necessary
+    """
+    print("Data management boots up")
+    while True:
+        addr, msg = yield From(data_q.get())
+        if msg == b'close':
+            break
+
+        if msg['op'] == 'get-data':
+            data = {k: data[k] for k in msg['keys']
+                                if k in data}
+            send_q.put_nowait((addr, data))
+
+        elif msg['op'] == 'put-data':
+            keys, values = msg['keys'], msg['values']
+            data.update(dict(zip(keys, values)))
+            if msg.get('reply'):
+                msg = {'op': 'put-ack', 'keys': keys}
+                send_q.put_nowait((addr, msg))
+            msg = {'op': 'register', 'keys': keys, 'address': address,
+                   'reply': False}
+            send_q.put_nowait((metadata_addr, msg))
+
+        elif msg['op'] == 'del-data':
+            for key in msg['keys']:
+                del data[key]
+            if msg.get('reply'):
+                msg = {'op': 'del-ack', 'keys': keys}
+                send_q.put_nowait((addr, msg))
+            msg = {'op': 'unregister', 'address': address, 'keys': msg['keys'],
+                   'reply': False}
+            send_q.put_nowait((metadata_addr, msg))
+
+    raise Return("Done managing data")
 
 @asyncio.coroutine
 def send(send_q, outgoing_q, signal_q):
@@ -214,6 +266,7 @@ def send(send_q, outgoing_q, signal_q):
         if msg == b'close':
             break
 
+        print("Enque outgoing message: %s" % str(msg))
         if not isinstance(msg, bytes):
             msg = dumps(msg)
         outgoing_q.put_nowait((addr, msg))
@@ -288,7 +341,7 @@ def get_datum(loop, addr, keys):
 
 
 @asyncio.coroutine
-def get_remote_data(loop, keys, metadata_addr, update=False):
+def get_remote_data(loop, keys, metadata_addr):
     msg = {'op': 'who-has', 'keys': keys}
     who_has = yield From(dealer_send_recv(loop, metadata_addr, msg))
 
@@ -301,7 +354,6 @@ def get_remote_data(loop, keys, metadata_addr, update=False):
     coroutines = [get_datum(loop, random.choice(list(who_has[k])), [k])
                   for k in keys]
     result = yield From(asyncio.gather(*coroutines))
-
 
     raise Return(merge(result))
 
