@@ -19,15 +19,17 @@ def dealer(addr):
 port = [8012]
 
 @contextmanager
-def mdstore():
+def mdstore(loop=None):
+    if loop is None:
+        loop = asyncio.get_event_loop_policy().new_event_loop()
     port[0] += 1
     mds = MDStore('127.0.0.1', port[0], '*')
-    mds.start()
 
     try:
         yield mds
     finally:
-        mds.close()
+        if mds.status != 'closed':
+            mds.close()
 
 
 @contextmanager
