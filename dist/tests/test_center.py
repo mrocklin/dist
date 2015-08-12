@@ -1,8 +1,9 @@
+import trollius as asyncio
+from trollius import From
+
 from dist import Center
 from dist.utils_test import center, dealer, Loop
 from dist.core import dumps, loads, delay
-import trollius as asyncio
-from trollius import From
 
 
 def test_center():
