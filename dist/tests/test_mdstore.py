@@ -1,6 +1,6 @@
 from dist import MDStore
 from dist.mdstore import dumps, loads
-from dist.test_utils import mdstore, dealer
+from dist.utils_test import mdstore, dealer
 
 
 def test_mdstore():
