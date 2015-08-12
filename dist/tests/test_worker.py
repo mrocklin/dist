@@ -1,6 +1,5 @@
 from dist import Worker, MDStore
-from dist.worker import loads, dumps
-from dist.utils import delay
+from dist.core import loads, dumps, delay
 from dist.utils_test import dealer, mdstore, Loop, worker, context, everything
 import trollius as asyncio
 from trollius import From, Return
