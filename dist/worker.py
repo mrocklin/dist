@@ -64,6 +64,7 @@ class Worker(object):
         self.work_q = asyncio.Queue(loop=self.loop)
         self.send_q = asyncio.Queue(loop=self.loop)
         self.data_q = asyncio.Queue(loop=self.loop)
+        self.heartbeat_q = asyncio.Queue(loop=self.loop)
         self.outgoing_q = asyncio.Queue(loop=self.loop)
         self.control_q = asyncio.Queue(loop=self.loop)
         self.signal_q = asyncio.Queue(loop=self.loop)
@@ -78,9 +79,14 @@ class Worker(object):
         coroutines = [
                 work(self.work_q, self.send_q, self.data, self.metadata_addr,
                      self.address, self.loop),
-                control(self.control_q, self.work_q, self.send_q, self.data_q,
-                        self.data),
+                control(self.control_q, {'compute': self.work_q,
+                                         'send': self.send_q,
+                                         'get-data': self.data_q,
+                                         'put-data': self.data_q,
+                                         'delete-data': self.data_q,
+                                         'ping': self.heartbeat_q}),
                 send(self.send_q, self.outgoing_q, self.signal_q),
+                heartbeat(self.heartbeat_q, self.send_q),
                 comm(self.ip, self.port, self.bind_ip, self.signal_q,
                      self.control_q, self.outgoing_q, self.loop, context),
                 manage_data(self.data_q, self.send_q, self.data,
@@ -90,6 +96,8 @@ class Worker(object):
         try:
             yield From(asyncio.wait(coroutines,
                                     return_when=asyncio.FIRST_COMPLETED))
+        except:
+            import pdb; pdb.set_trace()
         finally:
             self.close()
 
@@ -110,8 +118,8 @@ class Worker(object):
 
 
 @asyncio.coroutine
-def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
-         context=None):
+def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q,
+         loop=None, context=None):
     """ Communications coroutine
 
     Input Channels:
@@ -152,7 +160,7 @@ def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
             router.send_multipart([addr, msg])
             print("Message sent")
 
-        if first is wait_signal:        # Handle internal messages
+        if first is wait_signal:       # Handle internal messages
             msg = wait_signal.result()
             if msg == b'close':
                 control_q.put_nowait((None, b'close'))
@@ -160,7 +168,7 @@ def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
             elif msg == b'interrupt':
                 wait_signal = Task(signal_q.get(), loop=loop)
                 continue
-        elif first is wait_router:      # Handle external messages
+        elif first is wait_router:     # Handle external messages
             addr, byts = wait_router.result()
             msg = loads(byts)
             print("Communication received: %s" % str(msg))
@@ -169,37 +177,58 @@ def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q, loop=None,
     router.close(linger=2)
     dealer.close(linger=2)
 
-    raise Return("Done communicating")
+    raise Return("Comm done")
 
 
 @asyncio.coroutine
-def control(control_q, work_q, send_q, data_q, data):
-    """ Control coroutine, general dispatching
+def heartbeat(heartbeat_q, send_q):
+    """ A simple heartbeat coroutine
+
+    Input Channels:
+        heartbeat_q: should have messages of the form
+                     (address, {'op': 'ping'}
+
+    Output Channels:
+        send_q: send out messages of the form
+                (address, b'pong')
+    """
+    print("Heartbeat boots up")
+    while True:
+        addr, msg = yield From(heartbeat_q.get())
+        if msg == b'close':
+            break
+
+        send_q.put_nowait((addr, b'pong'))
+
+    raise Return("Heartbeat done")
+
+
+@asyncio.coroutine
+def control(control_q, out_qs):
+    """ Control coroutine, general dispatch
 
     Input Channels:
         control_q: Mailbox for any messages that come in from comm
 
     Output Channels:
-        work_q: jobs for the worker
-        send_q: people ask us to send them data
+        out_qs: a dictionary of operator: queue pairs
+                {'compute': compute_q, 'heartbeat': heartbeat_q}
+
     """
     print("Control boots up")
     while True:
         addr, msg = yield From(control_q.get())
         if msg == b'close':
-            work_q.put_nowait((addr, msg))
-            send_q.put_nowait((addr, msg))
-            data_q.put_nowait((addr, msg))
+            for q in set(out_qs.values()):
+                q.put_nowait((addr, b'close'))
             break
-        elif msg['op'] == 'compute':
-            work_q.put_nowait((addr, msg))
-        elif msg['op'] in ['get-data', 'put-data', 'del-data']:
-            data_q.put_nowait((addr, msg))
-        elif msg['op'] == 'ping':
-            send_q.put_nowait((addr, b'pong'))
-        else:
-            raise NotImplementedError("Bad Message: %s" % msg)
-    raise Return("Done listening")
+        try:
+            q = out_qs[msg['op']]
+        except KeyError:
+            raise NotImplementedError("Don't know how to route: %s" % msg)
+        q.put_nowait((addr, msg))
+
+    raise Return("Control done")
 
 
 @asyncio.coroutine
@@ -243,7 +272,7 @@ def manage_data(data_q, send_q, data, metadata_addr, address):
                    'reply': False}
             send_q.put_nowait((metadata_addr, msg))
 
-    raise Return("Done managing data")
+    raise Return("Manage data done")
 
 @asyncio.coroutine
 def send(send_q, outgoing_q, signal_q):
@@ -272,7 +301,7 @@ def send(send_q, outgoing_q, signal_q):
         outgoing_q.put_nowait((addr, msg))
         signal_q.put_nowait('interrupt')
 
-    raise Return("Done sending")
+    raise Return("Send done")
 
 
 @asyncio.coroutine
@@ -324,7 +353,7 @@ def work(work_q, send_q, data, metadata_addr, address, loop=None):
 
         send_q.put_nowait((addr, out))
 
-    raise Return("Done working")
+    raise Return("Work done")
 
 
 @asyncio.coroutine

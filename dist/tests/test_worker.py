@@ -19,7 +19,6 @@ def test_Worker():
                     for i in range(3):
                         sock.send(dumps(msg))
                         result = yield From(delay(loop, sock.recv))
-                        print(result)
                         assert result == b'pong'
 
                     w.close()
