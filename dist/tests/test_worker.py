@@ -1,6 +1,6 @@
-from dist import Worker, MDStore
+from dist import Worker
 from dist.core import loads, dumps, delay
-from dist.utils_test import dealer, mdstore, Loop, worker, context, everything
+from dist.utils_test import dealer, center, Loop, worker, context, everything
 import trollius as asyncio
 from trollius import From, Return
 from operator import add
@@ -8,25 +8,23 @@ from time import sleep
 
 
 def test_Worker():
-    with mdstore() as mds, Loop() as loop:
-        with worker(metadata_port=mds.port, loop=loop) as w:
-            with dealer(w.address) as sock:
+    with Loop() as loop, center(loop) as c, worker(metadata_port=c.port, loop=loop) as w, dealer(w.address) as sock:
 
-                @asyncio.coroutine
-                def f():
-                    msg = {'op': 'ping'}
-                    for i in range(3):
-                        sock.send(dumps(msg))
-                        result = yield From(delay(loop, sock.recv))
-                        assert result == b'pong'
+        @asyncio.coroutine
+        def f():
+            msg = {'op': 'ping'}
+            for i in range(3):
+                sock.send(dumps(msg))
+                result = yield From(delay(loop, sock.recv))
+                assert result == b'pong'
 
-                    w.close()
+            w.close()
 
-                loop.run_until_complete(asyncio.gather(w.go(), f()))
+        loop.run_until_complete(asyncio.gather(w.go(), f()))
 
 
 def test_get_data():
-    with everything() as (loop, mds, w, sock):
+    with everything() as (loop, c, w, sock):
         w.data['x'] = 123
         @asyncio.coroutine
         def f():
@@ -36,15 +34,16 @@ def test_get_data():
                 result = yield From(delay(loop, sock.recv))
                 assert loads(result) == {'x': 123}
             w.close()
+            c.close()
 
-        loop.run_until_complete(asyncio.gather(w.go(), f()))
+        loop.run_until_complete(asyncio.gather(w.go(), c.go(), f()))
 
 
 def test_compute():
-    with everything() as (loop, mds, w, sock):
+    with everything() as (loop, c, w, sock):
         w.data['x'] = 123
-        mds.who_has['x'].add(w.address)
-        mds.has_what[w.address].add('x')
+        c.who_has['x'].add(w.address)
+        c.has_what[w.address].add('x')
 
         @asyncio.coroutine
         def f():
@@ -61,17 +60,18 @@ def test_compute():
                                          'key': 'y'}
 
             w.close()
+            c.close()
 
-        loop.run_until_complete(asyncio.gather(w.go(), f()))
+        loop.run_until_complete(asyncio.gather(w.go(), c.go(), f()))
 
 
 def test_remote_gather():
-    with Loop() as loop, mdstore() as mds, worker(metadata_port=mds.port, port=1234, loop=loop) as a, worker(metadata_port=mds.port, port=4321, loop=loop) as b, dealer(a.address) as sock:
+    with Loop() as loop, center(loop=loop) as c, worker(metadata_port=c.port, port=1234, loop=loop) as a, worker(metadata_port=c.port, port=4321, loop=loop) as b, dealer(a.address) as sock:
 
         # Put 'x' in b's data.  Register with metadata store
         b.data['x'] = 123
-        mds.who_has['x'].add(b.address)
-        mds.has_what[b.address].add('x')
+        c.who_has['x'].add(b.address)
+        c.has_what[b.address].add('x')
 
         @asyncio.coroutine
         def f():
@@ -89,15 +89,16 @@ def test_remote_gather():
 
             a.close()
             b.close()
+            c.close()
 
-        loop.run_until_complete(asyncio.gather(a.go(), b.go(), f()))
+        loop.run_until_complete(asyncio.gather(a.go(), b.go(), c.go(), f()))
         assert a.data['y'] == 10 + 123
-        assert mds.who_has['y'] == set([a.address])
-        assert 'y' in mds.has_what[a.address]
+        assert c.who_has['y'] == set([a.address])
+        assert 'y' in c.has_what[a.address]
 
 
 def test_no_data_found():
-    with everything() as (loop, mds, w, sock):
+    with everything() as (loop, c, w, sock):
         @asyncio.coroutine
         def f():
             msg = {'op': 'compute',
@@ -114,13 +115,14 @@ def test_no_data_found():
             assert 'asdf' in str(result['error'])
 
             w.close()
+            c.close()
 
-        loop.run_until_complete(asyncio.gather(w.go(), f()))
+        loop.run_until_complete(asyncio.gather(w.go(), c.go(), f()))
 
 
 """
 def test_worker_data_management():
-    with everything() as (loop, mds, w, sock):
+    with everything() as (loop, c, w, sock):
         @asyncio.coroutine
         def f():
             msg = {'op': 'put-data',
@@ -139,10 +141,10 @@ def test_worker_data_management():
 
         for i in range(100):
             sleep(0.01)
-            if mds.who_has['x']:
+            if c.who_has['x']:
                 break
 
-        assert mds.who_has['x'] == set([w.address])
-        assert mds.who_has['y'] == set([w.address])
-        assert mds.has_what[w.address] == set(['x', 'y'])
+        assert c.who_has['x'] == set([w.address])
+        assert c.who_has['y'] == set([w.address])
+        assert c.has_what[w.address] == set(['x', 'y'])
 """

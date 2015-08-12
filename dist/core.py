@@ -163,7 +163,10 @@ def dealer_send_recv(loop, addr, data):
     yield From(delay(loop, socket.send, data))
     result = yield From(delay(loop, socket.recv))
     socket.close()  # TODO: LRU sockets
-    result = loads(result)
+    try:
+        result = loads(result)
+    except Exception as e:
+        print(e)
     raise Return(result)
 
 

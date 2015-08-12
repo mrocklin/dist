@@ -59,7 +59,7 @@ def worker(metadata_port, port=3598, loop=None):
 @contextmanager
 def everything():
     with Loop() as loop:
-        with center() as center:
-            with worker(metadata_port=center.port, loop=loop) as w:
+        with center(loop=loop) as c:
+            with worker(metadata_port=c.port, loop=loop) as w:
                 with dealer(w.address) as sock:
-                    yield loop, center, w, sock
+                    yield loop, c, w, sock
