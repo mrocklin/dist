@@ -1,4 +1,4 @@
-from dist import Worker, MDStore
+from dist import Worker, Center
 import trollius as asyncio
 from contextlib import contextmanager
 import zmq
@@ -19,17 +19,17 @@ def dealer(addr):
 port = [8012]
 
 @contextmanager
-def mdstore(loop=None):
+def center(loop=None):
     if loop is None:
         loop = asyncio.get_event_loop_policy().new_event_loop()
     port[0] += 1
-    mds = MDStore('127.0.0.1', port[0], '*')
+    c = Center('127.0.0.1', port[0], '*', loop=loop, context=context)
 
     try:
-        yield mds
+        yield c
     finally:
-        if mds.status != 'closed':
-            mds.close()
+        if c.status != 'closed':
+            c.close()
 
 
 @contextmanager
@@ -59,7 +59,7 @@ def worker(metadata_port, port=3598, loop=None):
 @contextmanager
 def everything():
     with Loop() as loop:
-        with mdstore() as mds:
-            with worker(metadata_port=mds.port, loop=loop) as w:
+        with center() as center:
+            with worker(metadata_port=center.port, loop=loop) as w:
                 with dealer(w.address) as sock:
-                    yield loop, mds, w, sock
+                    yield loop, center, w, sock

@@ -10,7 +10,7 @@ from trollius import From, Return
 from .core import (comm, control, pingpong, send, delay, dealer_send_recv,
         context)
 
-class MDStore(object):
+class Center(object):
     """ A central point of contact
 
     >>> c = Center(ip='192.168.0.45', port=8000, bind_ip='*')
