@@ -54,7 +54,7 @@ class Worker(object):
     >>> w.close()  # doctest: +SKIP
     """
     def __init__(self, ip, port, bind_ip,
-                 metadata_addr, loop=None):
+                 metadata_addr, loop=None, start=False):
         self.ip = ip
         self.port = port
         self.bind_ip = bind_ip
@@ -68,6 +68,9 @@ class Worker(object):
         self.signal_q = asyncio.Queue(loop=self.loop)
 
         self.status = 'running'
+
+        if start:
+            self.start()
 
     @asyncio.coroutine
     def go(self):
