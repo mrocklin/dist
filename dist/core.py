@@ -74,26 +74,26 @@ def comm(ip, port, bind_ip, signal_q, control_q, outgoing_q,
 
 
 @asyncio.coroutine
-def heartbeat(heartbeat_q, send_q):
-    """ A simple heartbeat coroutine
+def pingpong(pingpong_q, send_q):
+    """ A simple pingpong coroutine
 
     Input Channels:
-        heartbeat_q: should have messages of the form
+        pingpong_q: should have messages of the form
                      (address, {'op': 'ping'}
 
     Output Channels:
         send_q: send out messages of the form
                 (address, b'pong')
     """
-    print("Heartbeat boots up")
+    print("pingpong boots up")
     while True:
-        addr, msg = yield From(heartbeat_q.get())
+        addr, msg = yield From(pingpong_q.get())
         if msg == b'close':
             break
 
         send_q.put_nowait((addr, b'pong'))
 
-    raise Return("Heartbeat done")
+    raise Return("PingPong done")
 
 
 @asyncio.coroutine
@@ -105,7 +105,7 @@ def control(control_q, out_qs):
 
     Output Channels:
         out_qs: a dictionary of operator: queue pairs
-                {'compute': compute_q, 'heartbeat': heartbeat_q}
+                {'compute': compute_q, 'pingpong': pingpong_q}
 
     """
     print("Control boots up")

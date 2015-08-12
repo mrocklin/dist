@@ -36,7 +36,7 @@ from toolz import merge, get
 import trollius as asyncio
 from trollius import From, Return
 
-from .core import (comm, control, heartbeat, send, delay, dealer_send_recv,
+from .core import (comm, control, pingpong, send, delay, dealer_send_recv,
         context)
 
 
@@ -63,7 +63,7 @@ class Worker(object):
         self.work_q = asyncio.Queue(loop=self.loop)
         self.send_q = asyncio.Queue(loop=self.loop)
         self.data_q = asyncio.Queue(loop=self.loop)
-        self.heartbeat_q = asyncio.Queue(loop=self.loop)
+        self.pingpong_q = asyncio.Queue(loop=self.loop)
         self.outgoing_q = asyncio.Queue(loop=self.loop)
         self.control_q = asyncio.Queue(loop=self.loop)
         self.signal_q = asyncio.Queue(loop=self.loop)
@@ -83,9 +83,9 @@ class Worker(object):
                                          'get-data': self.data_q,
                                          'put-data': self.data_q,
                                          'delete-data': self.data_q,
-                                         'ping': self.heartbeat_q}),
+                                         'ping': self.pingpong_q}),
                 send(self.send_q, self.outgoing_q, self.signal_q),
-                heartbeat(self.heartbeat_q, self.send_q),
+                pingpong(self.pingpong_q, self.send_q),
                 comm(self.ip, self.port, self.bind_ip, self.signal_q,
                      self.control_q, self.outgoing_q, self.loop, self.context),
                 manage_data(self.data_q, self.send_q, self.data,
